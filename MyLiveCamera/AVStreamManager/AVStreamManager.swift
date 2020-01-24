@@ -28,6 +28,8 @@ class AVStreamManager: NSObject {
     var videoDeviceInput: AVCaptureDeviceInput!
     var audioDeviceInput: AVCaptureDeviceInput!
     
+    var liveStreamWorker = LiveStreamWorker()
+    
     override init() {
         super.init()
         self.registerNotifications()
@@ -116,7 +118,7 @@ extension AVStreamManager {
     func configureSession() {
         
         sessionCapture.beginConfiguration()
-        sessionCapture.sessionPreset = .medium
+        sessionCapture.sessionPreset = .high
         
         guard let videoDevice = self.getCameraDevice(position: .back),
             let audioDevice = AVCaptureDevice.default(for: .audio) else {
@@ -125,6 +127,7 @@ extension AVStreamManager {
         }
         
         self.setupAVInput(videoDevice: videoDevice, audioDevice: audioDevice)
+        self.setupAVOutput(videoOutput: self.liveStreamWorker.videoDataOutput, audioOutput: self.liveStreamWorker.audioDataOutput)
         sessionCapture.commitConfiguration()
     }
     
@@ -190,6 +193,31 @@ extension AVStreamManager {
             return
         }
 
+        self.setupResult = .success
+    }
+    
+
+    func setupAVOutput(videoOutput: AVCaptureVideoDataOutput, audioOutput: AVCaptureAudioDataOutput) {
+                
+        // Video
+        if sessionCapture.canAddOutput(videoOutput) {
+            sessionCapture.addOutput(videoOutput)
+        }
+        else {
+            NSLog("Couldn't add video data output to the session. \(videoOutput)")
+            self.setupResult = .configurationFailed
+            return
+        }
+        
+        // Audio
+        if sessionCapture.canAddOutput(audioOutput) {
+            sessionCapture.addOutput(audioOutput)
+        }
+        else {
+            NSLog("Couldn't add audio data output to the session. \(audioOutput)")
+            self.setupResult = .configurationFailed
+            return
+        }
         self.setupResult = .success
     }
 }
