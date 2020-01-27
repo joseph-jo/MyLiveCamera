@@ -15,15 +15,18 @@ class Resampler: NSObject {
     var audioConverter: AudioConverterRef?
     var dataPool = MyBuffer(count: Int(outBufferSize * 10))
     var srcDesc: AudioStreamBasicDescription? = nil
+    var destDesc: AudioStreamBasicDescription? = nil
     var destSampleRate: Float64 = 0
     var debugFileHandle: FileHandle? = nil
+    var onStreamingHandler: ((NSData, CMTime) -> Void)?
+    var onSampleBufferHandler: ((CMSampleBuffer) -> Void)?
     
     static let outBufferSize: UInt32 = 2048
     
     init(to sampleRate: Float64) {
         super.init()
         destSampleRate = sampleRate
-        debugFileHandle = self.initFileHandle(fileName: "audio.pcm")
+//        debugFileHandle = self.initFileHandle(fileName: "audio.pcm")
     }
         
     func setupAudioConverter(with sampleBuffer: CMSampleBuffer) -> AudioConverterRef? {
@@ -39,6 +42,7 @@ class Resampler: NSObject {
         var status: OSStatus
         var audioConverter: AudioConverterRef?
         destDesc.mSampleRate = destSampleRate
+        self.destDesc = destDesc
         
         status = AudioConverterNew(descPtr, &destDesc, &audioConverter)
         if status != noErr {
@@ -51,7 +55,10 @@ class Resampler: NSObject {
  
 extension Resampler {
     
-    func resample(with sampleBuffer: CMSampleBuffer) {
+    func resample(with sampleBuffer: CMSampleBuffer, streamingHandler: @escaping (NSData, CMTime) -> Void, sampleBufferHandler: @escaping (CMSampleBuffer) -> Void ) {
+        
+        self.onStreamingHandler = streamingHandler
+        self.onSampleBufferHandler = sampleBufferHandler
         
         audioConverter = self.setupAudioConverter(with: sampleBuffer)
         
@@ -60,7 +67,8 @@ extension Resampler {
             guard let audioConverterUnwrap = self.audioConverter else { return }
             
             guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
-            
+            let timeP = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                        
             let resampledData = NSMutableData()
             var lengthAtOffset: Int = 0
             var totalLength: Int = 0
@@ -105,7 +113,17 @@ extension Resampler {
             } while status == noErr
                          
             self.dataPool.resetAll()
+            
+            // Output 1
             self.debugFileHandle?.write(resampledData as Data)
+            
+            // Output 2
+            self.onStreamingHandler?(resampledData, CMTime(value: timeP.value, timescale: CMTimeScale(self.destSampleRate)))
+            
+            // Output 3
+            let sampleBufferNullable = self.buildSampleBuffer(with: resampledData, timestamp: timeP)
+            guard let resampledBuffer = sampleBufferNullable else { return }
+            self.onSampleBufferHandler?(resampledBuffer)
         }
     }
 }
@@ -166,4 +184,30 @@ func resamplerOutputCallback(inAudioConverter: AudioConverterRef, ioNumberDataPa
     }
          
     return noErr;
+}
+
+
+extension Resampler {
+    
+    func buildSampleBuffer(with binaryData: NSData, timestamp: CMTime) -> CMSampleBuffer? {
+         
+         var audioFormat = self.destDesc!
+         var audioCMAudioFormatDescNullable: CMAudioFormatDescription? = nil
+         CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                        asbd: &audioFormat,
+                                        layoutSize: 0,
+                                        layout: nil,
+                                        magicCookieSize: 0,
+                                        magicCookie: nil,
+                                        extensions: nil,
+                                        formatDescriptionOut: &audioCMAudioFormatDescNullable
+                                        );
+        
+         let audioSampleTimingInformation = CMSampleTimingInfo(duration: CMTimeMake(value: 1, timescale: Int32(8000.0)), presentationTimeStamp: timestamp, decodeTimeStamp: CMTime.invalid)
+         
+         guard let audioCMAudioFormatDesc = audioCMAudioFormatDescNullable else { return nil }
+         let newSampleBuffer = SampleBufferCreater.buildForAudio(with: binaryData, description: audioCMAudioFormatDesc, numberOfSamples: 1, timeInfo: audioSampleTimingInformation)
+         
+        return newSampleBuffer
+    }
 }

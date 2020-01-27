@@ -17,6 +17,9 @@ class H264Encoder: NSObject {
     var videoWidth: Int32 = 0
     var videoHeight: Int32 = 0
     
+    var onStreamingHandler: ((NSData, CMTime) -> Void)?
+    var onSampleBufferHandler: ((CMSampleBuffer) -> Void)?
+    
     init(videoSize: CGSize) {
         super.init()
         self.setupEncoder(videoSize: videoSize)
@@ -48,26 +51,18 @@ class H264Encoder: NSObject {
     }
 }
 
-func h264OutputCallback(outputCallbackRefCon: UnsafeMutableRawPointer?, sourceFrameRefCon: UnsafeMutableRawPointer?,status: OSStatus, infoFlags: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?)
-{
-    guard let sampleBuffer = sampleBuffer else { return }
-    guard let h264Encoder = sourceFrameRefCon else { return }
-    let scopedSelf = Unmanaged<H264Encoder>.fromOpaque(h264Encoder).takeUnretainedValue()
-
-    guard let (binaryData, timestamp) = H264Encoder.getBinaryData(with:sampleBuffer) else { return }
-    
-    NSLog("\(timestamp): \(binaryData.length)")
-}
-
 extension H264Encoder {
    
-    func encode(with sampleBuffer: CMSampleBuffer) {
+    func encode(with sampleBuffer: CMSampleBuffer, streamingHandler: @escaping (NSData, CMTime) -> Void, sampleBufferHandler: @escaping (CMSampleBuffer) -> Void ) {
         
+        self.onStreamingHandler = streamingHandler
+        self.onSampleBufferHandler = sampleBufferHandler
         h264EncodeQueue.async {
 
             guard let session = self.sessionCompression else { return }
             guard let imageBuffer = sampleBuffer.getCVImageBuffer() else { return }
-        
+ 
+            
             let presentationTimeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                        
             let unmanagedSelf = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -81,6 +76,28 @@ extension H264Encoder {
     }
 }
 
+func h264OutputCallback(outputCallbackRefCon: UnsafeMutableRawPointer?, sourceFrameRefCon: UnsafeMutableRawPointer?,status: OSStatus, infoFlags: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?)
+{
+    guard let sampleBuffer = sampleBuffer else { return }
+    guard let h264Encoder = sourceFrameRefCon else { return }
+    let scopedSelf = Unmanaged<H264Encoder>.fromOpaque(h264Encoder).takeUnretainedValue()
+
+    guard let (binaryData, timestamp) = H264Encoder.getBinaryData(with: sampleBuffer) else { return }
+    
+    scopedSelf.onStreamingHandler?(binaryData, timestamp)
+  
+
+    //
+    let newImageBufffer = H264Encoder.buildImageBuffer(with: binaryData, width: Int(scopedSelf.videoWidth), height: Int(scopedSelf.videoHeight), formatType: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+
+    var timingInfo = CMSampleTimingInfo()
+    CMSampleBufferGetSampleTimingInfo(sampleBuffer, at: 0, timingInfoOut: &timingInfo);
+    if newImageBufffer != nil {
+        guard let newSampleBuffer = SampleBufferCreater.buildForVideo(with: newImageBufffer!, numberOfSamples: 1, timeInfo: timingInfo) else { return }
+        
+        scopedSelf.onSampleBufferHandler?(newSampleBuffer)
+    }
+}
 
 extension H264Encoder {
 
@@ -98,7 +115,6 @@ extension H264Encoder {
                 isKeyFrame = true
             }
         }
-        NSLog("\(isKeyFrame)")
         
         if isKeyFrame {
             
@@ -175,5 +191,37 @@ extension H264Encoder {
             ret.append(data as Data)
         }
         return ret
+    }
+}
+
+extension H264Encoder {
+    
+    static func buildImageBuffer(with binaryData: NSData, width: Int, height: Int, formatType: OSType) -> CVPixelBuffer? {
+        
+        var newPixelBufferNullable: CVPixelBuffer? = nil
+            
+        var ptrBytes = UnsafeMutableRawPointer.allocate(byteCount: binaryData.length, alignment: 0)
+        defer {
+            ptrBytes.deallocate()
+        }
+        binaryData.getBytes(ptrBytes, length: binaryData.length)
+        
+        var status: OSStatus
+        status = CVPixelBufferCreateWithBytes(kCFAllocatorDefault,
+                                         width,
+                                         height,
+                                        formatType,
+                                         ptrBytes,
+                                         width * 4,
+                                         nil,
+                                         nil,
+                                         nil,
+                                         &newPixelBufferNullable)
+        if status != noErr {
+            return nil
+        }
+        guard let newPixelBuffer = newPixelBufferNullable else { return nil }
+                
+        return newPixelBuffer
     }
 }

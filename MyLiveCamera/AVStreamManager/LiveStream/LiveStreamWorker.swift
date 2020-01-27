@@ -46,15 +46,30 @@ extension LiveStreamWorker {
                 videoEncoder = H264Encoder.init(videoSize: videoSize)
             }
                         
-            videoEncoder.encode(with: sampleBuffer)
+            videoEncoder.encode(with: sampleBuffer, streamingHandler: { (binaryData, timestamp) in
+                            
+//                NSLog("video: \(timestamp): \(binaryData.length)")
+            }, sampleBufferHandler: {
+                            (encodedBuffer) in
+                            
+//                NSLog("video: \(encodedBuffer)")
+            })
         }
             
+        // Audio
         else if output == audioDataOutput {
             
             if resampler == nil {
                 resampler = Resampler(to: 8000)
             }
-            resampler.resample(with: sampleBuffer)
+            resampler.resample(with: sampleBuffer, streamingHandler: { (binaryData, timestamp) in
+                
+//                NSLog("audio: \(timestamp): \(binaryData.length)")
+            }, sampleBufferHandler: {
+                (resampledBuffer) in
+                
+//                NSLog("audio: \(resampledBuffer)")
+            })
         }
     }
 }
