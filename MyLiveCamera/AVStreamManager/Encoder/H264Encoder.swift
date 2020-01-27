@@ -28,7 +28,7 @@ class H264Encoder: NSObject {
         
          videoWidth = Int32(videoSize.width)
          videoHeight = Int32(videoSize.height)
-         let status = VTCompressionSessionCreate(allocator: nil, width: videoWidth, height: videoHeight, codecType: kCMVideoCodecType_H264, encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: outputCallback, refcon:unmanagedSelf, compressionSessionOut: &(sessionCompression))
+         let status = VTCompressionSessionCreate(allocator: nil, width: videoWidth, height: videoHeight, codecType: kCMVideoCodecType_H264, encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: h264OutputCallback, refcon:unmanagedSelf, compressionSessionOut: &(sessionCompression))
         
         guard status == 0 else { return }
         guard let session = sessionCompression else { return }
@@ -48,7 +48,7 @@ class H264Encoder: NSObject {
     }
 }
 
-func outputCallback(outputCallbackRefCon: UnsafeMutableRawPointer?, sourceFrameRefCon: UnsafeMutableRawPointer?,status: OSStatus, infoFlags: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?)
+func h264OutputCallback(outputCallbackRefCon: UnsafeMutableRawPointer?, sourceFrameRefCon: UnsafeMutableRawPointer?,status: OSStatus, infoFlags: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?)
 {
     guard let sampleBuffer = sampleBuffer else { return }
     guard let h264Encoder = sourceFrameRefCon else { return }
