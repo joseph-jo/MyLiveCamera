@@ -177,7 +177,7 @@ func resamplerOutputCallback(inAudioConverter: AudioConverterRef, ioNumberDataPa
         ioData.pointee.mBuffers.mData = ptrBytes
         ioData.pointee.mBuffers.mDataByteSize = UInt32(copiedData.length)
                 
-        ioNumberDataPackets.pointee = UInt32(copiedData.length / 2)
+        ioNumberDataPackets.pointee = UInt32(copiedData.length / srcBytesPerPacket)
     }
     else {
         return -1
@@ -203,7 +203,7 @@ extension Resampler {
                                         formatDescriptionOut: &audioCMAudioFormatDescNullable
                                         );
         
-         let audioSampleTimingInformation = CMSampleTimingInfo(duration: CMTimeMake(value: 1, timescale: Int32(8000.0)), presentationTimeStamp: timestamp, decodeTimeStamp: CMTime.invalid)
+         let audioSampleTimingInformation = CMSampleTimingInfo(duration: CMTimeMake(value: 1, timescale: Int32(destSampleRate)), presentationTimeStamp: timestamp, decodeTimeStamp: CMTime.invalid)
          
          guard let audioCMAudioFormatDesc = audioCMAudioFormatDescNullable else { return nil }
          let newSampleBuffer = SampleBufferCreater.buildForAudio(with: binaryData, description: audioCMAudioFormatDesc, numberOfSamples: 1, timeInfo: audioSampleTimingInformation)
