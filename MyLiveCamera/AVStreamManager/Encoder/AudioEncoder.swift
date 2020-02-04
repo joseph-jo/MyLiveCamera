@@ -1,5 +1,5 @@
 //
-//  Resampler.swift
+//  AudioEncoder.swift
 //  MyLiveCamera
 //
 //  Created by Joseph Chen on 2020/1/25.
@@ -9,31 +9,45 @@
 import UIKit
 import AVFoundation
 
-class Resampler: NSObject {
+enum AudioEncode {
+    case pcm
+    case uLaw
+}
 
-    let resampleQueue = DispatchQueue(label: "resampleQueue")
+class AudioEncoder: NSObject {
+
+    let encodeQueue = DispatchQueue(label: "resampleQueue")
     var audioConverter: AudioConverterRef?
     var dataPool = MyBuffer(count: Int(outBufferSize * 10))
     var srcDesc: AudioStreamBasicDescription? = nil
     var destDesc: AudioStreamBasicDescription? = nil
     var destSampleRate: Float64 = 0
+    var destCodec: AudioFormatID = kAudioFormatLinearPCM
     var debugFileHandle: FileHandle? = nil
     var onStreamingHandler: ((NSData, CMTime) -> Void)?
     var onSampleBufferHandler: ((CMSampleBuffer) -> Void)?
     
     static let outBufferSize: UInt32 = 2048
     
-    init(to sampleRate: Float64) {
+    init(to sampleRate: Float64, codec: AudioEncode) {
         super.init()
         destSampleRate = sampleRate
-//        debugFileHandle = self.initFileHandle(fileName: "audio.pcm")
+        
+        switch codec {
+        case .uLaw:
+            destCodec = kAudioFormatULaw
+        case .pcm:
+            destCodec = kAudioFormatLinearPCM
+        }
+        
+        debugFileHandle = self.initFileHandle(fileName: "audio.pcm")
     }
         
     func setupAudioConverter(with sampleBuffer: CMSampleBuffer) -> AudioConverterRef? {
         
         if self.audioConverter != nil { return self.audioConverter }
         
-        guard destSampleRate > 0 else { return nil }
+        guard destSampleRate >= 0 else { return nil }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return nil }
         guard let descPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return nil }
         self.srcDesc = descPtr.pointee
@@ -41,7 +55,10 @@ class Resampler: NSObject {
         
         var status: OSStatus
         var audioConverter: AudioConverterRef?
-        destDesc.mSampleRate = destSampleRate
+        destDesc.mFormatID = destCodec
+        if destSampleRate > 0 {
+            destDesc.mSampleRate = destSampleRate
+        }
         self.destDesc = destDesc
         
         status = AudioConverterNew(descPtr, &destDesc, &audioConverter)
@@ -53,16 +70,16 @@ class Resampler: NSObject {
     }
 }
  
-extension Resampler {
+extension AudioEncoder {
     
-    func resample(with sampleBuffer: CMSampleBuffer, streamingHandler: @escaping (NSData, CMTime) -> Void, sampleBufferHandler: @escaping (CMSampleBuffer) -> Void ) {
+    func encode(with sampleBuffer: CMSampleBuffer, streamingHandler: @escaping (NSData, CMTime) -> Void, sampleBufferHandler: @escaping (CMSampleBuffer) -> Void ) {
         
         self.onStreamingHandler = streamingHandler
         self.onSampleBufferHandler = sampleBufferHandler
         
         audioConverter = self.setupAudioConverter(with: sampleBuffer)
         
-        resampleQueue.async {
+        encodeQueue.async {
             
             guard let audioConverterUnwrap = self.audioConverter else { return }
             
@@ -87,12 +104,12 @@ extension Resampler {
             repeat {
                 
                 var packetSize: UInt32 = 1
-                let mDataBuffer = UnsafeMutableRawPointer.allocate(byteCount: Int(Resampler.outBufferSize), alignment: 0)
+                let mDataBuffer = UnsafeMutableRawPointer.allocate(byteCount: Int(AudioEncoder.outBufferSize), alignment: 0)
                 defer {
                     mDataBuffer.deallocate()
                 }
                 
-                var outAudioBufferList = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(mNumberChannels: 1, mDataByteSize: Resampler.outBufferSize, mData: mDataBuffer))
+                var outAudioBufferList = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(mNumberChannels: 1, mDataByteSize: AudioEncoder.outBufferSize, mData: mDataBuffer))
               
                 let unmanagedSelf = Unmanaged.passUnretained(self).toOpaque()
               
@@ -128,7 +145,7 @@ extension Resampler {
     }
 }
 
-extension Resampler {
+extension AudioEncoder {
     
     func initFileHandle(fileName: String) -> FileHandle? {
         
@@ -154,7 +171,7 @@ extension Resampler {
 
 func resamplerOutputCallback(inAudioConverter: AudioConverterRef, ioNumberDataPackets: UnsafeMutablePointer<UInt32>, ioData: UnsafeMutablePointer<AudioBufferList>, outDataPacketDescription: UnsafeMutablePointer<UnsafeMutablePointer<AudioStreamPacketDescription>?>?, inUserData: UnsafeMutableRawPointer?) -> OSStatus
 {
-    let scopedSelf = Unmanaged<Resampler>.fromOpaque(inUserData!).takeUnretainedValue()
+    let scopedSelf = Unmanaged<AudioEncoder>.fromOpaque(inUserData!).takeUnretainedValue()
      
     var srcBytesPerPacket: Int = 2   // 1 packet: 2bytes
     if scopedSelf.srcDesc != nil && scopedSelf.srcDesc!.mBytesPerPacket > 0 {
@@ -187,7 +204,7 @@ func resamplerOutputCallback(inAudioConverter: AudioConverterRef, ioNumberDataPa
 }
 
 
-extension Resampler {
+extension AudioEncoder {
     
     func buildSampleBuffer(with binaryData: NSData, timestamp: CMTime) -> CMSampleBuffer? {
          

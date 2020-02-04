@@ -16,7 +16,7 @@ class LiveStreamWorker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     var liveStreamDataQueue = DispatchQueue(label: "liveStreamDataQueue")
     
     var videoEncoder: H264Encoder!
-    var resampler: Resampler!
+    var audioEncoder: AudioEncoder!
     var running: Bool { return recording || encoding }
     var recording = false
     private(set) var encoding = false
@@ -59,16 +59,16 @@ extension LiveStreamWorker {
         // Audio
         else if output == audioDataOutput {
             
-            if resampler == nil {
-                resampler = Resampler(to: 8000)
+            if audioEncoder == nil {
+                audioEncoder = AudioEncoder(to: 8000, codec: .uLaw)
             }
-            resampler.resample(with: sampleBuffer, streamingHandler: { (binaryData, timestamp) in
+            audioEncoder.encode(with: sampleBuffer, streamingHandler: { (binaryData, timestamp) in
                 
 //                NSLog("audio: \(timestamp): \(binaryData.length)")
             }, sampleBufferHandler: {
-                (resampledBuffer) in
+                (encodedBuffer) in
                 
-//                NSLog("audio: \(resampledBuffer)")
+//                NSLog("audio: \(encodedBuffer)")
             })
         }
     }
